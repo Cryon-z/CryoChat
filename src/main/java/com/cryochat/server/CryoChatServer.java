@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 public class CryoChatServer {
     private final Config config;
@@ -38,6 +39,8 @@ public class CryoChatServer {
     private HttpServer server;
     private final ConcurrentHashMap<String, String> userSessions;
     private final ConcurrentHashMap<String, Long> lastMessageTime;
+    private final ConcurrentHashMap<String, Long> sessionLastActivity;
+    private final ConcurrentHashMap<String, Long> userLastActivity;
 
     public CryoChatServer(Config config) throws IOException {
         this.config = config;
@@ -49,6 +52,8 @@ public class CryoChatServer {
         this.objectMapper.findAndRegisterModules();
         this.userSessions = new ConcurrentHashMap<>();
         this.lastMessageTime = new ConcurrentHashMap<>();
+        this.sessionLastActivity = new ConcurrentHashMap<>();
+        this.userLastActivity = new ConcurrentHashMap<>();
     }
 
     public void start() throws IOException {
@@ -66,14 +71,17 @@ public class CryoChatServer {
         server.createContext("/api/chat", new ChatHandler());
         server.createContext("/api/chat/history", new ChatHistoryHandler());
         server.createContext("/api/users/online", new OnlineUsersHandler());
-        server.createContext("/api/files/check", new FileCheckHandler());
         server.createContext("/api/verify", new VerificationHandler());
         server.createContext("/api/sse", new SSEHandler());
+        server.createContext("/api/logout", new LogoutHandler());
+        server.createContext("/api/heartbeat", new HeartbeatHandler());
 
         server.start();
 
         // 启动文件清理任务
         startFileCleanupTask();
+        // 启动会话清理任务
+        startSessionCleanupTask();
 
         System.out.println("CryoChat server started on port: " + config.getPort());
         System.out.println("Please visit: http://localhost:" + config.getPort() + "/chat.html");
@@ -110,43 +118,70 @@ public class CryoChatServer {
         System.out.println("文件清理任务已启动");
     }
 
+    // 启动会话清理任务
+    private void startSessionCleanupTask() {
+        Thread cleanupThread = new Thread(() -> {
+            while (true) {
+                try {
+                    // 每小时执行一次会话清理
+                    Thread.sleep(TimeUnit.HOURS.toMillis(1));
+                    cleanupExpiredSessions();
+                } catch (InterruptedException e) {
+                    System.err.println("会话清理任务被中断: " + e.getMessage());
+                    break;
+                } catch (Exception e) {
+                    System.err.println("会话清理错误: " + e.getMessage());
+                }
+            }
+        });
+        cleanupThread.setDaemon(true);
+        cleanupThread.start();
+        System.out.println("会话清理任务已启动");
+    }
+
+    // 清理过期会话（24小时未活动）
+    private void cleanupExpiredSessions() {
+        long now = System.currentTimeMillis();
+        long expirationTime = 24 * 60 * 60 * 1000; // 24小时
+
+        sessionLastActivity.entrySet().removeIf(entry -> {
+            if (now - entry.getValue() > expirationTime) {
+                String sessionId = entry.getKey();
+                userSessions.remove(sessionId);
+                System.out.println("清理过期会话: " + sessionId);
+                return true;
+            }
+            return false;
+        });
+    }
+
     // 清理超过10天的文件
     private void cleanupOldFiles() {
         try {
-            Path dataDir = Paths.get(config.getDataDir());
-            if (!Files.exists(dataDir)) {
+            // 文件一律存放到 ./CryoChat/files/ 里面
+            Path filesDir = Paths.get("./CryoChat/files/");
+            if (!Files.exists(filesDir)) {
                 return;
             }
 
             Instant tenDaysAgo = Instant.now().minus(10, ChronoUnit.DAYS);
             AtomicInteger deletedFiles = new AtomicInteger(0);
 
-            // 遍历所有用户目录
-            Files.list(dataDir).forEach(userDir -> {
-                if (Files.isDirectory(userDir)) {
+            // 遍历文件目录
+            try (var fileStream = Files.list(filesDir)) {
+                fileStream.forEach(file -> {
                     try {
-                        Path filesDir = userDir.resolve("files");
-                        if (Files.exists(filesDir)) {
-                            try (var fileStream = Files.list(filesDir)) {
-                                fileStream.forEach(file -> {
-                                    try {
-                                        Instant lastModified = Files.getLastModifiedTime(file).toInstant();
-                                        if (lastModified.isBefore(tenDaysAgo)) {
-                                            Files.delete(file);
-                                            System.out.println("删除过期文件: " + file.getFileName());
-                                            deletedFiles.incrementAndGet();
-                                        }
-                                    } catch (IOException e) {
-                                        System.err.println("删除文件失败: " + file.getFileName() + " - " + e.getMessage());
-                                    }
-                                });
-                            }
+                        Instant lastModified = Files.getLastModifiedTime(file).toInstant();
+                        if (lastModified.isBefore(tenDaysAgo)) {
+                            Files.delete(file);
+                            System.out.println("删除过期文件: " + file.getFileName());
+                            deletedFiles.incrementAndGet();
                         }
                     } catch (IOException e) {
-                        System.err.println("遍历用户目录失败: " + userDir.getFileName() + " - " + e.getMessage());
+                        System.err.println("删除文件失败: " + file.getFileName() + " - " + e.getMessage());
                     }
-                }
-            });
+                });
+            }
 
             System.out.println("文件清理完成，删除了 " + deletedFiles.get() + " 个过期文件");
         } catch (IOException e) {
@@ -218,22 +253,16 @@ public class CryoChatServer {
 
             try {
                 LoginRequest request = objectMapper.readValue(exchange.getRequestBody(), LoginRequest.class);
-                String clientIp = getClientIp(exchange);
-
-                // Human verification
-                if (!webSocketHandler.verifyHuman(clientIp)) {
-                    sendJsonResponse(exchange, 429, new ApiResponse(false, "Too many requests, please try again later"));
-                    return;
-                }
 
                 boolean authenticated = authManager.authenticate(
-                        request.username, request.password, clientIp);
+                        request.username, request.password, getClientIp(exchange));
 
                 if (authenticated) {
                     String sessionId = generateSessionId();
                     userSessions.put(sessionId, request.username);
+                    sessionLastActivity.put(sessionId, System.currentTimeMillis());
+                    userLastActivity.put(request.username, System.currentTimeMillis());
 
-                    // 修复：使用正确的参数调用isAdmin方法
                     boolean isAdmin = authManager.isAdmin(request.username);
 
                     LoginResponse response = new LoginResponse(
@@ -243,7 +272,13 @@ public class CryoChatServer {
                             sessionId
                     );
 
-                    exchange.getResponseHeaders().set("Set-Cookie", "session=" + sessionId + "; Path=/");
+                    // 设置cookie过期时间（10天）
+                    String cookie = "session=" + sessionId + "; Path=/; HttpOnly; SameSite=Lax";
+                    if (request.rememberMe != null && request.rememberMe) {
+                        cookie += "; Max-Age=" + (10 * 24 * 60 * 60); // 10天
+                    }
+
+                    exchange.getResponseHeaders().set("Set-Cookie", cookie);
                     sendJsonResponse(exchange, 200, response);
                 } else {
                     sendJsonResponse(exchange, 401, new LoginResponse(false, "用户名或密码错误", false, null));
@@ -301,6 +336,10 @@ public class CryoChatServer {
                 sendJsonResponse(exchange, 401, new ApiResponse(false, "未登录"));
                 return;
             }
+
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
 
             try {
                 // 解析multipart/form-data
@@ -367,31 +406,24 @@ public class CryoChatServer {
                     return;
                 }
 
-                // 保存文件到目标用户的目录
-                String encodedTargetUser = Base64.getEncoder().encodeToString(targetUser.getBytes());
-                Path targetUserDir = Paths.get(config.getDataDir()).resolve(encodedTargetUser);
-                Path filesDir = targetUserDir.resolve("files");
-                Files.createDirectories(filesDir);
+                // 使用FileManager保存文件
+                FileInfo fileInfo = fileManager.saveFile(username, originalFilename, fileData);
 
-                // 使用原始文件名保存文件
-                Path filePath = filesDir.resolve(originalFilename);
-                Files.write(filePath, fileData);
-
-                System.out.println("文件保存成功: " + filePath.toAbsolutePath() + ", 大小: " + fileData.length + " 字节");
+                System.out.println("文件保存成功: " + fileInfo.getStoredName() + ", 大小: " + fileData.length + " 字节");
                 System.out.println("目标用户: " + targetUser);
 
-                // 创建文件信息
-                Map<String, Object> fileInfo = new HashMap<>();
-                fileInfo.put("originalName", originalFilename);
-                fileInfo.put("storedName", originalFilename);
-                fileInfo.put("size", fileData.length);
-                fileInfo.put("uploadTime", System.currentTimeMillis());
-                fileInfo.put("downloadUrl", "/api/download?user=" + targetUser + "&file=" + originalFilename);
+                // 创建文件信息响应
+                Map<String, Object> responseFileInfo = new HashMap<>();
+                responseFileInfo.put("originalName", fileInfo.getOriginalName());
+                responseFileInfo.put("storedName", fileInfo.getStoredName());
+                responseFileInfo.put("size", fileInfo.getSize());
+                responseFileInfo.put("uploadTime", System.currentTimeMillis());
+                responseFileInfo.put("downloadUrl", "/api/download?file=" + fileInfo.getStoredName());
 
                 Map<String, Object> responseData = new HashMap<>();
                 responseData.put("success", true);
                 responseData.put("message", "文件上传成功");
-                responseData.put("fileInfo", fileInfo);
+                responseData.put("fileInfo", responseFileInfo);
 
                 sendJsonResponse(exchange, 200, responseData);
 
@@ -428,19 +460,21 @@ public class CryoChatServer {
                 return;
             }
 
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
+
             try {
-                // Get file and user parameters from query
+                // Get file parameter from query
                 String query = exchange.getRequestURI().getQuery();
                 String fileName = null;
-                String targetUser = username; // 默认下载当前用户的文件
 
                 if (query != null) {
                     String[] params = query.split("&");
                     for (String param : params) {
                         if (param.startsWith("file=")) {
                             fileName = param.substring(5);
-                        } else if (param.startsWith("user=")) {
-                            targetUser = param.substring(5);
+                            break;
                         }
                     }
                 }
@@ -450,19 +484,8 @@ public class CryoChatServer {
                     return;
                 }
 
-                // Create target user file directory path
-                String encodedTargetUser = Base64.getEncoder().encodeToString(targetUser.getBytes());
-                Path targetUserDir = Paths.get(config.getDataDir()).resolve(encodedTargetUser);
-                Path filesDir = targetUserDir.resolve("files");
-                Path filePath = filesDir.resolve(fileName);
-
-                if (!Files.exists(filePath)) {
-                    sendJsonResponse(exchange, 404, new ApiResponse(false, "文件不存在"));
-                    return;
-                }
-
-                // Read file data
-                byte[] fileData = Files.readAllBytes(filePath);
+                // Read file data using FileManager
+                byte[] fileData = fileManager.getFile(fileName);
 
                 // Set response headers
                 exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
@@ -496,6 +519,10 @@ public class CryoChatServer {
                 sendJsonResponse(exchange, 401, new ApiResponse(false, "未登录"));
                 return;
             }
+
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
 
             try {
                 Message message = objectMapper.readValue(exchange.getRequestBody(), Message.class);
@@ -541,11 +568,15 @@ public class CryoChatServer {
                 return;
             }
 
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
+
             try {
                 // 清除消息时间缓存，避免重复消息检查
                 lastMessageTime.entrySet().removeIf(entry -> entry.getKey().startsWith(username + "_"));
 
-                // Get user's chat history
+                // Get user's chat history - 直接从文件读取
                 String encodedUsername = Base64.getEncoder().encodeToString(username.getBytes());
                 Path userDir = Paths.get(config.getDataDir()).resolve(encodedUsername);
                 Path chatLog = userDir.resolve("chat.log");
@@ -560,7 +591,7 @@ public class CryoChatServer {
                                 Message message = objectMapper.readValue(line, Message.class);
                                 messages.add(message);
                             } catch (Exception e) {
-                                System.err.println("解析消息失败: " + e.getMessage());
+                                System.err.println("解析消息失败: " + e.getMessage() + " - 行内容: " + line);
                             }
                         }
                     }
@@ -596,10 +627,17 @@ public class CryoChatServer {
                 return;
             }
 
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
+
             try {
-                // Get online users from chat manager
-                var activeSessions = chatManager.getActiveSessions();
-                List<String> onlineUsers = new ArrayList<>(activeSessions.keySet());
+                // 获取5分钟内有活动的用户作为在线用户
+                long fiveMinutesAgo = System.currentTimeMillis() - (5 * 60 * 1000);
+                List<String> onlineUsers = userLastActivity.entrySet().stream()
+                        .filter(entry -> entry.getValue() > fiveMinutesAgo)
+                        .map(Map.Entry::getKey)
+                        .collect(Collectors.toList());
 
                 // 隐藏当前用户
                 onlineUsers.remove(username);
@@ -618,59 +656,6 @@ public class CryoChatServer {
         }
     }
 
-    private class FileCheckHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if (!"GET".equals(exchange.getRequestMethod())) {
-                exchange.sendResponseHeaders(405, -1);
-                return;
-            }
-
-            // Verify session
-            String sessionId = getSessionId(exchange);
-            String username = userSessions.get(sessionId);
-            if (username == null) {
-                sendJsonResponse(exchange, 401, new ApiResponse(false, "未登录"));
-                return;
-            }
-
-            try {
-                // Create user file directory path
-                String encodedUsername = Base64.getEncoder().encodeToString(username.getBytes());
-                Path userDir = Paths.get(config.getDataDir()).resolve(encodedUsername);
-                Path filesDir = userDir.resolve("files");
-
-                List<Map<String, Object>> fileList = new ArrayList<>();
-
-                if (Files.exists(filesDir)) {
-                    Files.list(filesDir).forEach(filePath -> {
-                        try {
-                            Map<String, Object> fileInfo = new HashMap<>();
-                            fileInfo.put("name", filePath.getFileName().toString());
-                            fileInfo.put("size", Files.size(filePath));
-                            fileInfo.put("lastModified", Files.getLastModifiedTime(filePath).toMillis());
-                            fileInfo.put("path", filePath.toAbsolutePath().toString());
-                            fileList.add(fileInfo);
-                        } catch (IOException e) {
-                            System.err.println("读取文件信息失败: " + e.getMessage());
-                        }
-                    });
-                }
-
-                Map<String, Object> responseData = new HashMap<>();
-                responseData.put("success", true);
-                responseData.put("files", fileList);
-                responseData.put("filesDir", filesDir.toAbsolutePath().toString());
-
-                sendJsonResponse(exchange, 200, responseData);
-
-            } catch (Exception e) {
-                System.err.println("检查文件错误: " + e.getMessage());
-                sendJsonResponse(exchange, 500, new ApiResponse(false, "检查文件错误: " + e.getMessage()));
-            }
-        }
-    }
-
     private class VerificationHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
@@ -681,10 +666,8 @@ public class CryoChatServer {
 
             try {
                 VerificationRequest request = objectMapper.readValue(exchange.getRequestBody(), VerificationRequest.class);
-                String clientIp = getClientIp(exchange);
 
-                boolean verified = webSocketHandler.verifyHuman(clientIp) &&
-                        "I am human".equalsIgnoreCase(request.captcha);
+                boolean verified = "I am human".equalsIgnoreCase(request.captcha);
 
                 if (verified) {
                     sendJsonResponse(exchange, 200, new ApiResponse(true, "验证成功"));
@@ -714,14 +697,19 @@ public class CryoChatServer {
                 return;
             }
 
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
+
             // Set SSE headers
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
             exchange.getResponseHeaders().set("Cache-Control", "no-cache");
             exchange.getResponseHeaders().set("Connection", "keep-alive");
             exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+            exchange.getResponseHeaders().set("Access-Control-Allow-Credentials", "true");
             exchange.sendResponseHeaders(200, 0);
 
-            // Create SSE connection
+            // Create SSE connection with heartbeat
             WebSocketHandler.SSEConnection sseConnection = new WebSocketHandler.SSEConnection() {
                 private volatile boolean closed = false;
 
@@ -737,15 +725,96 @@ public class CryoChatServer {
                 @Override
                 public void close() throws IOException {
                     closed = true;
-                    // Response body will be automatically closed when connection closes
+                }
+
+                @Override
+                public boolean isClosed() {
+                    return closed;
                 }
             };
 
             // Register SSE connection
             webSocketHandler.addSSEConnection(username, sseConnection);
 
-            // Keep connection open until client disconnects
-            // Note: In production environment, need to handle connection timeout and heartbeat
+            // Start heartbeat thread
+            startHeartbeat(sseConnection, exchange);
+
+            System.out.println("SSE连接建立: " + username);
+        }
+
+        private void startHeartbeat(WebSocketHandler.SSEConnection connection, HttpExchange exchange) {
+            Thread heartbeatThread = new Thread(() -> {
+                try {
+                    while (!connection.isClosed()) {
+                        Thread.sleep(30000); // 30秒发送一次心跳
+                        if (!connection.isClosed()) {
+                            connection.sendMessage("{\"type\":\"heartbeat\"}");
+                        }
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (IOException e) {
+                    // 连接已关闭，正常退出
+                    System.out.println("SSE心跳连接已关闭: " + e.getMessage());
+                }
+            });
+            heartbeatThread.setDaemon(true);
+            heartbeatThread.start();
+        }
+    }
+
+    private class LogoutHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            // Verify session
+            String sessionId = getSessionId(exchange);
+            String username = userSessions.get(sessionId);
+
+            if (username != null) {
+                // Remove session
+                userSessions.remove(sessionId);
+                sessionLastActivity.remove(sessionId);
+                userLastActivity.remove(username);
+
+                // Remove SSE connection
+                webSocketHandler.removeSSEConnection(username);
+
+                System.out.println("用户退出登录: " + username);
+            }
+
+            // Clear cookie
+            exchange.getResponseHeaders().set("Set-Cookie", "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+
+            sendJsonResponse(exchange, 200, new ApiResponse(true, "退出登录成功"));
+        }
+    }
+
+    private class HeartbeatHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"POST".equals(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(405, -1);
+                return;
+            }
+
+            // Verify session
+            String sessionId = getSessionId(exchange);
+            String username = userSessions.get(sessionId);
+            if (username == null) {
+                sendJsonResponse(exchange, 401, new ApiResponse(false, "未登录"));
+                return;
+            }
+
+            // 更新会话活动时间
+            sessionLastActivity.put(sessionId, System.currentTimeMillis());
+            userLastActivity.put(username, System.currentTimeMillis());
+
+            sendJsonResponse(exchange, 200, new ApiResponse(true, "心跳成功"));
         }
     }
 
@@ -788,6 +857,7 @@ public class CryoChatServer {
     private static class LoginRequest {
         public String username;
         public String password;
+        public Boolean rememberMe;
     }
 
     private static class VerificationRequest {

@@ -42,7 +42,11 @@ public class ChatManager {
     public void removeUserSession(String username, Consumer<Message> messageHandler) {
         CopyOnWriteArrayList<Consumer<Message>> sessions = userSessions.get(username);
         if (sessions != null) {
-            sessions.remove(messageHandler);
+            if (messageHandler != null) {
+                sessions.remove(messageHandler);
+            } else {
+                sessions.clear();
+            }
             if (sessions.isEmpty()) {
                 userSessions.remove(username);
             }
@@ -56,29 +60,64 @@ public class ChatManager {
         saveMessageToReceiver(message);
 
         // Send to target user
-        CopyOnWriteArrayList<Consumer<Message>> targetSessions = userSessions.get(message.getTo());
-        if (targetSessions != null) {
-            System.out.println("Sending message to " + message.getTo());
-            targetSessions.forEach(handler -> handler.accept(message));
+        if ("group".equals(message.getTo())) {
+            // 群聊消息发送给所有在线用户
+            userSessions.forEach((username, sessions) -> {
+                if (!username.equals(message.getFrom())) { // 不发送给自己
+                    System.out.println("Sending group message to " + username);
+                    sessions.forEach(handler -> {
+                        try {
+                            handler.accept(message);
+                        } catch (Exception e) {
+                            System.err.println("Error sending message to " + username + ": " + e.getMessage());
+                        }
+                    });
+                }
+            });
         } else {
-            System.out.println("Target user not online: " + message.getTo());
-        }
-
-        // 如果是发送给管理员的消息，管理员也能看到
-        if ("admin".equals(message.getTo())) {
-            CopyOnWriteArrayList<Consumer<Message>> adminSessions = userSessions.get("admin");
-            if (adminSessions != null && !message.getFrom().equals("admin")) {
-                System.out.println("Sending message to admin");
-                adminSessions.forEach(handler -> handler.accept(message));
+            // 私聊消息
+            CopyOnWriteArrayList<Consumer<Message>> targetSessions = userSessions.get(message.getTo());
+            if (targetSessions != null) {
+                System.out.println("Sending private message to " + message.getTo());
+                targetSessions.forEach(handler -> {
+                    try {
+                        handler.accept(message);
+                    } catch (Exception e) {
+                        System.err.println("Error sending private message to " + message.getTo() + ": " + e.getMessage());
+                    }
+                });
+            } else {
+                System.out.println("Target user not online: " + message.getTo());
             }
-        }
 
-        // 如果是管理员发送的消息，发送给目标用户
-        if ("admin".equals(message.getFrom()) && !"admin".equals(message.getTo())) {
-            CopyOnWriteArrayList<Consumer<Message>> userTargetSessions = userSessions.get(message.getTo());
-            if (userTargetSessions != null) {
-                System.out.println("Admin sending message to " + message.getTo());
-                userTargetSessions.forEach(handler -> handler.accept(message));
+            // 如果是发送给管理员的消息，管理员也能看到
+            if ("admin".equals(message.getTo())) {
+                CopyOnWriteArrayList<Consumer<Message>> adminSessions = userSessions.get("admin");
+                if (adminSessions != null && !message.getFrom().equals("admin")) {
+                    System.out.println("Sending message to admin");
+                    adminSessions.forEach(handler -> {
+                        try {
+                            handler.accept(message);
+                        } catch (Exception e) {
+                            System.err.println("Error sending message to admin: " + e.getMessage());
+                        }
+                    });
+                }
+            }
+
+            // 如果是管理员发送的消息，发送给目标用户
+            if ("admin".equals(message.getFrom()) && !"admin".equals(message.getTo())) {
+                CopyOnWriteArrayList<Consumer<Message>> userTargetSessions = userSessions.get(message.getTo());
+                if (userTargetSessions != null) {
+                    System.out.println("Admin sending message to " + message.getTo());
+                    userTargetSessions.forEach(handler -> {
+                        try {
+                            handler.accept(message);
+                        } catch (Exception e) {
+                            System.err.println("Error sending admin message to " + message.getTo() + ": " + e.getMessage());
+                        }
+                    });
+                }
             }
         }
     }
@@ -103,22 +142,46 @@ public class ChatManager {
     }
 
     private void saveMessageToReceiver(Message message) throws IOException {
-        String encodedUsername = Base64.getEncoder().encodeToString(message.getTo().getBytes());
-        Path userDir = dataDir.resolve(encodedUsername);
+        if ("group".equals(message.getTo())) {
+            // 群聊消息保存到所有用户的目录
+            userSessions.forEach((username, sessions) -> {
+                if (!username.equals(message.getFrom())) { // 不保存给自己
+                    try {
+                        String encodedUsername = Base64.getEncoder().encodeToString(username.getBytes());
+                        Path userDir = dataDir.resolve(encodedUsername);
 
-        // Ensure user directory exists
-        if (!Files.exists(userDir)) {
-            Files.createDirectories(userDir);
-            System.out.println("Created user directory: " + userDir.toAbsolutePath());
+                        if (!Files.exists(userDir)) {
+                            Files.createDirectories(userDir);
+                        }
+
+                        Path chatLog = userDir.resolve("chat.log");
+                        String logEntry = objectMapper.writeValueAsString(message) + "\n";
+                        Files.writeString(chatLog, logEntry,
+                                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    } catch (IOException e) {
+                        System.err.println("Error saving group message to " + username + ": " + e.getMessage());
+                    }
+                }
+            });
+        } else {
+            // 私聊消息
+            String encodedUsername = Base64.getEncoder().encodeToString(message.getTo().getBytes());
+            Path userDir = dataDir.resolve(encodedUsername);
+
+            // Ensure user directory exists
+            if (!Files.exists(userDir)) {
+                Files.createDirectories(userDir);
+                System.out.println("Created user directory: " + userDir.toAbsolutePath());
+            }
+
+            Path chatLog = userDir.resolve("chat.log");
+
+            String logEntry = objectMapper.writeValueAsString(message) + "\n";
+            Files.writeString(chatLog, logEntry,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+            System.out.println("Message saved to receiver: " + chatLog.toAbsolutePath());
         }
-
-        Path chatLog = userDir.resolve("chat.log");
-
-        String logEntry = objectMapper.writeValueAsString(message) + "\n";
-        Files.writeString(chatLog, logEntry,
-                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-        System.out.println("Message saved to receiver: " + chatLog.toAbsolutePath());
     }
 
     public Map<String, CopyOnWriteArrayList<Consumer<Message>>> getActiveSessions() {

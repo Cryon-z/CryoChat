@@ -13,7 +13,8 @@ public class FileManager {
     private final Path storageDir;
 
     public FileManager(String dataDir) throws IOException {
-        this.storageDir = Paths.get(dataDir, "files");
+        // 文件一律存放到 ./CryoChat/files/ 里面
+        this.storageDir = Paths.get("./CryoChat/files/");
         Files.createDirectories(storageDir);
     }
 

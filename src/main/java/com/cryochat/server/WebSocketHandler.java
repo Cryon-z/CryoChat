@@ -5,13 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class WebSocketHandler {
     private final ChatManager chatManager;
     private final FileManager fileManager;
     private final ObjectMapper objectMapper;
-    private final ConcurrentHashMap<String, AtomicInteger> connectionCounts;
     private final ConcurrentHashMap<String, SSEConnection> sseConnections;
 
     public WebSocketHandler(ChatManager chatManager, FileManager fileManager) {
@@ -19,20 +17,27 @@ public class WebSocketHandler {
         this.fileManager = fileManager;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.findAndRegisterModules();
-        this.connectionCounts = new ConcurrentHashMap<>();
         this.sseConnections = new ConcurrentHashMap<>();
     }
 
     public void addSSEConnection(String username, SSEConnection connection) {
+        // 移除旧的连接（如果存在）
+        removeSSEConnection(username);
+
         sseConnections.put(username, connection);
 
         // Add user session to chat manager
         chatManager.addUserSession(username, message -> {
             try {
-                connection.sendMessage(objectMapper.writeValueAsString(message));
+                if (!connection.isClosed()) {
+                    connection.sendMessage(objectMapper.writeValueAsString(message));
+                } else {
+                    // 连接已关闭，移除会话
+                    removeSSEConnection(username);
+                }
             } catch (IOException e) {
                 // Connection might be closed, remove session
-                System.err.println("Failed to send message: " + e.getMessage());
+                System.err.println("Failed to send message to " + username + ": " + e.getMessage());
                 removeSSEConnection(username);
             }
         });
@@ -45,10 +50,11 @@ public class WebSocketHandler {
                 connection.close();
             } catch (IOException e) {
                 // Ignore close exception
-                System.err.println("Failed to close SSE connection: " + e.getMessage());
+                System.err.println("Failed to close SSE connection for " + username + ": " + e.getMessage());
             }
         }
         chatManager.removeUserSession(username, null);
+        System.out.println("SSE连接已移除: " + username);
     }
 
     public void handleMessage(String username, String messageJson) {
@@ -69,8 +75,6 @@ public class WebSocketHandler {
     }
 
     private void handleFileMessage(Message message) throws IOException {
-        // In actual implementation, this should handle file upload and download
-        // Simplified implementation, directly send message
         try {
             chatManager.sendMessage(message);
         } catch (IOException e) {
@@ -79,32 +83,10 @@ public class WebSocketHandler {
         }
     }
 
-    // Human verification - simple connection frequency limit
-    public boolean verifyHuman(String clientIp) {
-        AtomicInteger count = connectionCounts.computeIfAbsent(clientIp, k -> new AtomicInteger(0));
-        int currentCount = count.incrementAndGet();
-
-        // Simple rate limit: maximum 10 connections per minute
-        if (currentCount > 10) {
-            return false;
-        }
-
-        // Reset counter (simplified implementation)
-        new Thread(() -> {
-            try {
-                Thread.sleep(60000); // 1 minute
-                count.decrementAndGet();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }).start();
-
-        return true;
-    }
-
     // SSE connection interface
     public interface SSEConnection {
         void sendMessage(String message) throws IOException;
         void close() throws IOException;
+        boolean isClosed();
     }
 }
