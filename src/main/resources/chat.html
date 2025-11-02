@@ -188,6 +188,19 @@
         .user-item.admin::after {
             content: " 👑";
         }
+        .user-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .user-status.online {
+            background: #2ecc71;
+        }
+        .user-status.offline {
+            background: #e74c3c;
+        }
 
         .chat-area {
             flex: 1;
@@ -416,6 +429,13 @@
                 <input type="password" id="password" placeholder="请输入密码">
             </div>
 
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="rememberMe" checked>
+                    10天内自动登录
+                </label>
+            </div>
+
             <div class="captcha-container">
                 <p><strong>人机验证</strong></p>
                 <p>请在下方输入: <code>I am human</code></p>
@@ -466,11 +486,11 @@
                 <div class="user-info">
                     <div id="currentUser">用户名</div>
                     <div id="userStatus" style="font-size: 0.9em; opacity: 0.8;"></div>
-                    <button onclick="checkFiles()" style="margin-top: 10px; width: 100%; padding: 8px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">
-                        检查文件
-                    </button>
-                    <button onclick="refreshOnlineUsers()" style="margin-top: 5px; width: 100%; padding: 8px; background: #2c5aa0; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">
+                    <button onclick="refreshOnlineUsers()" style="margin-top: 10px; width: 100%; padding: 8px; background: #2c5aa0; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">
                         刷新在线用户
+                    </button>
+                    <button onclick="logout()" style="margin-top: 5px; width: 100%; padding: 8px; background: #e67e22; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">
+                        退出登录
                     </button>
                 </div>
 
@@ -530,10 +550,12 @@
     let currentSession = null;
     let eventSource = null;
     let onlineUsersInterval = null;
+    let heartbeatInterval = null;
     let selectedFiles = [];
     let currentChatTarget = 'group'; // 默认进入全局群聊
     let lastMessageTime = 0;
     let messageDelay = 50; // 50毫秒延迟
+    let allUsers = []; // 存储所有注册用户
 
     // 支持的文件格式
     const ALLOWED_FILE_TYPES = [
@@ -577,6 +599,7 @@
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
         const captcha = document.getElementById('captcha').value;
+        const rememberMe = document.getElementById('rememberMe').checked;
 
         if (!username || !password) {
             alert('请输入用户名和密码');
@@ -591,8 +614,14 @@
         try {
             const response = await fetch('/api/login', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    username,
+                    password,
+                    rememberMe
+                })
             });
 
             const result = await response.json();
@@ -608,8 +637,10 @@
                 showChat();
                 connectSSE();
                 loadChatHistory();
+                loadAllUsers(); // 加载所有用户
                 loadOnlineUsers();
                 startOnlineUsersPolling();
+                startHeartbeat(); // 开始心跳
             } else {
                 alert('登录失败: ' + result.message);
             }
@@ -654,12 +685,99 @@
         }
     }
 
+    // 退出登录功能
+    async function logout() {
+        if (!confirm('确定要退出登录吗？')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/logout', {
+                method: 'POST',
+                headers: {
+                    'Cookie': 'session=' + currentSession
+                }
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // 清理所有定时器和连接
+                if (onlineUsersInterval) {
+                    clearInterval(onlineUsersInterval);
+                }
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                }
+                if (eventSource) {
+                    eventSource.close();
+                }
+
+                // 重置全局变量
+                currentUser = null;
+                currentSession = null;
+
+                // 清除cookie
+                document.cookie = "session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+
+                // 显示登录页面
+                document.getElementById('chatPage').classList.add('hidden');
+                document.getElementById('loginPage').classList.remove('hidden');
+
+                alert('已成功退出登录');
+            } else {
+                alert('退出登录失败: ' + result.message);
+            }
+        } catch (error) {
+            alert('退出登录请求失败: ' + error.message);
+        }
+    }
+
+    // 心跳功能 - 定期发送活动状态
+    function startHeartbeat() {
+        // 先清除可能存在的旧心跳
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+        }
+
+        // 立即发送一次心跳
+        sendHeartbeat();
+
+        // 每30秒发送一次心跳
+        heartbeatInterval = setInterval(sendHeartbeat, 30000);
+    }
+
+    // 发送心跳
+    async function sendHeartbeat() {
+        if (!currentSession) return;
+
+        try {
+            await fetch('/api/heartbeat', {
+                method: 'POST',
+                headers: {
+                    'Cookie': 'session=' + currentSession
+                }
+            });
+        } catch (error) {
+            console.error('心跳发送失败:', error);
+        }
+    }
+
     // SSE连接
     function connectSSE() {
-        eventSource = new EventSource('/api/sse');
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        eventSource = new EventSource('/api/sse', { withCredentials: true });
 
         eventSource.onmessage = function(event) {
             const message = JSON.parse(event.data);
+
+            // 忽略心跳消息
+            if (message.type === 'heartbeat') {
+                return;
+            }
 
             // 添加消息延迟，避免重复消息
             const currentTime = Date.now();
@@ -683,9 +801,11 @@
 
         eventSource.onerror = function(error) {
             console.error('SSE连接错误:', error);
-            eventSource.close();
-            // 尝试重连
-            setTimeout(connectSSE, 3000);
+            if (eventSource.readyState === EventSource.CLOSED) {
+                eventSource.close();
+                // 尝试重连
+                setTimeout(connectSSE, 5000);
+            }
         };
     }
 
@@ -959,6 +1079,30 @@
         }
     }
 
+    // 加载所有用户
+    async function loadAllUsers() {
+        try {
+            const response = await fetch('/api/users/all', {
+                method: 'GET',
+                headers: {
+                    'Cookie': 'session=' + currentSession
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    allUsers = result.allUsers || [];
+                    console.log('加载所有用户:', allUsers);
+                }
+            }
+        } catch (error) {
+            console.error('加载所有用户失败:', error);
+            // 如果API不存在，使用在线用户列表作为备选
+            allUsers = [];
+        }
+    }
+
     // 加载在线用户
     async function loadOnlineUsers() {
         try {
@@ -991,28 +1135,39 @@
     }
 
     // 更新在线用户列表
-    function updateOnlineUsersList(users) {
+    function updateOnlineUsersList(onlineUsers) {
         const userListDiv = document.getElementById('userList');
         const onlineCountSpan = document.getElementById('onlineCount');
 
         userListDiv.innerHTML = '';
-        onlineCountSpan.textContent = users.length;
 
-        if (users.length === 0) {
-            userListDiv.innerHTML = '<div class="user-item">暂无在线用户</div>';
+        // 过滤掉当前用户
+        const filteredUsers = onlineUsers.filter(user => user !== currentUser);
+        onlineCountSpan.textContent = filteredUsers.length;
+
+        if (filteredUsers.length === 0) {
+            userListDiv.innerHTML = '<div class="user-item">暂无其他在线用户</div>';
             return;
         }
 
-        users.forEach(user => {
+        filteredUsers.forEach(user => {
             const userItem = document.createElement('div');
             userItem.className = 'user-item';
             if (user === currentChatTarget) {
                 userItem.classList.add('active');
             }
-            if (user.startsWith('admin') || user === 'admin') {
+            if (user === 'admin') {
                 userItem.classList.add('admin');
             }
-            userItem.textContent = user;
+
+            // 添加在线状态指示器
+            const statusSpan = document.createElement('span');
+            statusSpan.className = 'user-status online';
+            statusSpan.title = '在线';
+
+            userItem.appendChild(statusSpan);
+            userItem.appendChild(document.createTextNode(user));
+
             userItem.onclick = () => selectUser(user);
             userListDiv.appendChild(userItem);
         });
@@ -1061,29 +1216,6 @@
 
         // 清空当前消息显示
         document.getElementById('chatMessages').innerHTML = '';
-    }
-
-    // 检查文件
-    async function checkFiles() {
-        try {
-            const response = await fetch('/api/files/check', {
-                method: 'GET',
-                headers: {
-                    'Cookie': 'session=' + currentSession
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.success) {
-                    console.log('文件目录:', result.filesDir);
-                    console.log('文件列表:', result.files);
-                    alert(`文件目录: ${result.filesDir}\n文件数量: ${result.files.length}`);
-                }
-            }
-        } catch (error) {
-            console.error('检查文件失败:', error);
-        }
     }
 
     // 文件选择处理
@@ -1159,8 +1291,33 @@
         if (onlineUsersInterval) {
             clearInterval(onlineUsersInterval);
         }
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+        }
         if (eventSource) {
             eventSource.close();
+        }
+
+        // 发送登出请求
+        if (currentSession) {
+            fetch('/api/logout', {
+                method: 'POST',
+                headers: {
+                    'Cookie': 'session=' + currentSession
+                }
+            }).catch(() => {}); // 忽略错误
+        }
+    });
+
+    // 添加页面可见性变化处理
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') {
+            // 页面重新可见时重新连接SSE
+            if (currentSession && (!eventSource || eventSource.readyState === EventSource.CLOSED)) {
+                console.log('页面重新可见，重新连接SSE');
+                connectSSE();
+                loadOnlineUsers();
+            }
         }
     });
 
