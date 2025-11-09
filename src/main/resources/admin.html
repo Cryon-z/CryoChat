@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoChat - 管理员面板</title>
+    <link rel="icon" href="/CryoChat/favicon.ico" type="image/x-icon">
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --surface-color: #21262d;
+            --primary-color: #0366d6;
+            --text-color: #f0f6fc;
+            --text-secondary: #8b949e;
+            --border-color: #30363d;
+            --header-bg: #161b22;
+            --table-header: #161b22;
+            --table-row-even: #21262d;
+            --table-row-odd: #262b33;
+            --link-color: #58a6ff;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+        }
+
+        [data-theme="light"] {
+            --bg-color: #ffffff;
+            --surface-color: #f6f8fa;
+            --primary-color: #58a6ff;
+            --text-color: #24292e;
+            --text-secondary: #6a737d;
+            --border-color: #e1e4e8;
+            --header-bg: #f6f8fa;
+            --table-header: #f6f8fa;
+            --table-row-even: #ffffff;
+            --table-row-odd: #f6f8fa;
+            --link-color: #0366d6;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--bg-color) 0%, var(--surface-color) 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* 消息提示样式 */
+        .message-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            z-index: 10000;
+            max-width: 300px;
+            box-shadow: var(--shadow);
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            transform: translateX(100%);
+            opacity: 0;
+        }
+
+        .message-toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .message-toast.success {
+            background: var(--success-color);
+        }
+
+        .message-toast.error {
+            background: var(--danger-color);
+        }
+
+        .message-toast.warning {
+            background: var(--warning-color);
+            color: #000;
+        }
+
+        .message-toast.info {
+            background: var(--primary-color);
+        }
+
+        /* 头部样式 */
+        .header {
+            background: var(--surface-color);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 2em;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .admin-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        /* 登录页面样式 */
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            background: var(--surface-color);
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+
+        .login-form {
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-color);
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+            background: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .btn {
+            padding: 12px 24px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #1e3d6f;
+        }
+
+        .btn-success {
+            background: var(--success-color);
+        }
+
+        .btn-warning {
+            background: var(--warning-color);
+            color: #000;
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* 统计卡片样式 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--surface-color);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: var(--primary-color);
+            margin: 10px 0;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        /* 表格样式 */
+        .table-container {
+            background: var(--surface-color);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--table-header);
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        tr:nth-child(even) {
+            background: var(--table-row-even);
+        }
+
+        tr:nth-child(odd) {
+            background: var(--table-row-odd);
+        }
+
+        tr:hover {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        /* 标签样式 */
+        .badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .badge-warning {
+            background: var(--warning-color);
+            color: #000;
+        }
+
+        .badge-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        /* 操作按钮组 */
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+        }
+
+        /* 搜索和工具条 */
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            gap: 15px;
+        }
+
+        .search-box {
+            flex: 1;
+            max-width: 400px;
+        }
+
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--surface-color);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-title {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .close {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--text-color);
+        }
+
+        /* 主题切换按钮 */
+        .theme-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: var(--surface-color);
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: var(--shadow);
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle:hover {
+            transform: scale(1.1);
+        }
+
+        .theme-toggle i {
+            font-size: 1.2rem;
+            color: var(--text-color);
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .search-box {
+                max-width: none;
+            }
+            
+            table {
+                font-size: 0.9em;
+            }
+            
+            th, td {
+                padding: 8px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+<!-- 消息提示容器 -->
+<div id="messageToast" class="message-toast hidden"></div>
+
+<!-- 登录页面 -->
+<div id="loginPage" class="login-container">
+    <div class="login-form">
+        <div class="logo" style="margin-bottom: 10px;">CryoChat</div>
+        <div style="color: var(--text-secondary); margin-bottom: 30px;">管理员登录</div>
+
+        <div class="form-group">
+            <label for="adminUsername">用户名</label>
+            <input type="text" id="adminUsername" placeholder="请输入管理员用户名">
+        </div>
+
+        <div class="form-group">
+            <label for="adminPassword">密码</label>
+            <input type="password" id="adminPassword" placeholder="请输入管理员密码">
+        </div>
+
+        <button class="btn" onclick="adminLogin()" style="width: 100%;">登录</button>
+    </div>
+</div>
+
+<!-- 管理面板 -->
+<div id="adminPanel" class="container hidden">
+    <!-- 头部 -->
+    <div class="header">
+        <div class="logo">CryoChat 管理面板</div>
+        <div class="admin-info">
+            <span id="adminWelcome">欢迎，管理员</span>
+            <button class="btn btn-danger btn-small" onclick="adminLogout()">退出登录</button>
+            <button class="btn btn-warning btn-small" onclick="goToChat()">返回聊天</button>
+        </div>
+    </div>
+
+    <!-- 统计信息 -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">总用户数</div>
+            <div class="stat-number" id="totalUsers">0</div>
+            <div class="stat-label">注册用户总数</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">在线用户</div>
+            <div class="stat-number" id="onlineUsers">0</div>
+            <div class="stat-label">当前在线用户数</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">封禁用户</div>
+            <div class="stat-number" id="bannedUsers">0</div>
+            <div class="stat-label">被封禁用户数</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">服务器状态</div>
+            <div class="stat-number" id="serverStatus">运行中</div>
+            <div class="stat-label" id="lastCleanup">-</div>
+        </div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+        <div class="search-box">
+            <input type="text" id="searchUsers" placeholder="搜索用户..." oninput="searchUsers()">
+        </div>
+        <div class="action-buttons">
+            <button class="btn btn-success" onclick="refreshStats()">刷新统计</button>
+            <button class="btn btn-warning" onclick="showCleanupModal()">清理文件</button>
+            <button class="btn btn-danger" onclick="showRestartModal()">重启服务器</button>
+        </div>
+    </div>
+
+    <!-- 用户管理表格 -->
+    <div class="table-container">
+        <table>
+            <thead>
+            <tr>
+                <th>用户名</th>
+                <th>状态</th>
+                <th>最后登录</th>
+                <th>注册时间</th>
+                <th>操作</th>
+            </tr>
+            </thead>
+            <tbody id="usersTable">
+            <!-- 用户数据将通过JavaScript动态生成 -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 封禁用户模态框 -->
+<div id="banModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div class="modal-title">封禁用户</div>
+            <button class="close" onclick="closeModal('banModal')">&times;</button>
+        </div>
+        <div class="form-group">
+            <label>用户名</label>
+            <input type="text" id="banUsername" readonly>
+        </div>
+        <div class="form-group">
+            <label>封禁原因</label>
+            <input type="text" id="banReason" placeholder="请输入封禁原因">
+        </div>
+        <div class="form-group">
+            <label>封禁时长（天）</label>
+            <input type="number" id="banDuration" value="7" min="1" max="365">
+        </div>
+        <button class="btn btn-danger" onclick="banUser()" style="width: 100%;">确认封禁</button>
+    </div>
+</div>
+
+<!-- 删除用户模态框 -->
+<div id="deleteModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div class="modal-title">删除用户</div>
+            <button class="close" onclick="closeModal('deleteModal')">&times;</button>
+        </div>
+        <p style="margin-bottom: 20px;">确定要删除用户 <strong id="deleteUsername"></strong> 吗？此操作将删除该用户的所有数据和文件，且不可恢复！</p>
+        <div class="action-buttons" style="justify-content: flex-end;">
+            <button class="btn" onclick="closeModal('deleteModal')">取消</button>
+            <button class="btn btn-danger" onclick="deleteUser()">确认删除</button>
+        </div>
+    </div>
+</div>
+
+<!-- 清理文件模态框 -->
+<div id="cleanupModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div class="modal-title">清理文件</div>
+            <button class="close" onclick="closeModal('cleanupModal')">&times;</button>
+        </div>
+        <p style="margin-bottom: 20px;">此操作将删除所有超过10天的文件。确定要继续吗？</p>
+        <div class="action-buttons" style="justify-content: flex-end;">
+            <button class="btn" onclick="closeModal('cleanupModal')">取消</button>
+            <button class="btn btn-warning" onclick="cleanupFiles()">确认清理</button>
+        </div>
+    </div>
+</div>
+
+<!-- 重启服务器模态框 -->
+<div id="restartModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div class="modal-title">重启服务器</div>
+            <button class="close" onclick="closeModal('restartModal')">&times;</button>
+        </div>
+        <p style="margin-bottom: 20px;">此操作将重启服务器，所有用户将暂时无法访问。确定要继续吗？</p>
+        <div class="action-buttons" style="justify-content: flex-end;">
+            <button class="btn" onclick="closeModal('restartModal')">取消</button>
+            <button class="btn btn-danger" onclick="restartServer()">确认重启</button>
+        </div>
+    </div>
+</div>
+
+<!-- 主题切换按钮 -->
+<div class="theme-toggle" id="themeToggle" title="切换主题">
+    <i class="fas fa-moon"></i>
+</div>
+
+<script>
+    // 全局变量
+    let adminToken = null;
+    let currentUsers = [];
+    let filteredUsers = [];
+
+    // API基础路径
+    const API_BASE = '/CryoChat/api/admin';
+
+    // 显示消息提示
+    function showMessage(message, type = 'info', duration = 3000) {
+        const toast = document.getElementById('messageToast');
+        toast.textContent = message;
+        toast.className = `message-toast ${type}`;
+        toast.classList.remove('hidden');
+        toast.classList.add('show');
+
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 300);
+        }, duration);
+    }
+
+    // 管理员登录
+    async function adminLogin() {
+        const username = document.getElementById('adminUsername').value;
+        const password = document.getElementById('adminPassword').value;
+
+        if (!username || !password) {
+            showMessage('请输入管理员用户名和密码', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(API_BASE + '/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    username,
+                    password
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                adminToken = result.sessionId;
+                document.getElementById('adminWelcome').textContent = `欢迎，${username}`;
+                document.getElementById('loginPage').classList.add('hidden');
+                document.getElementById('adminPanel').classList.remove('hidden');
+
+                loadStats();
+                loadUsers();
+                showMessage('管理员登录成功', 'success');
+            } else {
+                showMessage('管理员登录失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('登录请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 管理员退出
+    async function adminLogout() {
+        try {
+            const response = await fetch(API_BASE + '/logout', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + adminToken
+                }
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                adminToken = null;
+                document.getElementById('adminPanel').classList.add('hidden');
+                document.getElementById('loginPage').classList.remove('hidden');
+
+                // 清空表单
+                document.getElementById('adminUsername').value = '';
+                document.getElementById('adminPassword').value = '';
+
+                showMessage('已退出管理员登录', 'success');
+            } else {
+                showMessage('退出登录失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('退出登录请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 返回聊天界面
+    function goToChat() {
+        window.location.href = '/CryoChat/';
+    }
+
+    // 加载统计信息
+    async function loadStats() {
+        if (!adminToken) return;
+
+        try {
+            const response = await fetch(API_BASE + '/stats', {
+                method: 'GET',
+                headers: {
+                    'Authorization': 'Bearer ' + adminToken
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    const stats = result.stats;
+                    document.getElementById('totalUsers').textContent = stats.totalUsers || 0;
+                    document.getElementById('onlineUsers').textContent = stats.onlineUsers || 0;
+                    document.getElementById('bannedUsers').textContent = stats.bannedUsers || 0;
+                    document.getElementById('lastCleanup').textContent = stats.lastCleanup || '-';
+                }
+            }
+        } catch (error) {
+            console.error('加载统计信息失败:', error);
+            showMessage('加载统计信息失败', 'error');
+        }
+    }
+
+    // 加载用户列表
+    async function loadUsers() {
+        if (!adminToken) return;
+
+        try {
+            const response = await fetch(API_BASE + '/users', {
+                method: 'GET',
+                headers: {
+                    'Authorization': 'Bearer ' + adminToken
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.success) {
+                    currentUsers = result.users || [];
+                    filteredUsers = [...currentUsers];
+                    renderUsersTable();
+                }
+            }
+        } catch (error) {
+            console.error('加载用户列表失败:', error);
+            showMessage('加载用户列表失败', 'error');
+        }
+    }
+
+    // 搜索用户
+    async function searchUsers() {
+        const searchTerm = document.getElementById('searchUsers').value.trim();
+
+        if (!searchTerm) {
+            filteredUsers = [...currentUsers];
+        } else {
+            try {
+                const response = await fetch(API_BASE + '/users/search?q=' + encodeURIComponent(searchTerm), {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + adminToken
+                    }
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success) {
+                        filteredUsers = result.users || [];
+                    }
+                }
+            } catch (error) {
+                console.error('搜索用户失败:', error);
+                // 如果搜索API失败，使用本地过滤
+                filteredUsers = currentUsers.filter(user =>
+                    user.username.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }
+        }
+
+        renderUsersTable();
+    }
+
+    // 渲染用户表格
+    function renderUsersTable() {
+        const tbody = document.getElementById('usersTable');
+        tbody.innerHTML = '';
+
+        if (filteredUsers.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">没有找到用户</td></tr>';
+            return;
+        }
+
+        filteredUsers.forEach(user => {
+            const tr = document.createElement('tr');
+
+            const statusBadge = user.banned ?
+                '<span class="badge badge-danger">已封禁</span>' :
+                '<span class="badge badge-success">正常</span>';
+
+            tr.innerHTML = `
+                <td>${escapeHtml(user.username)}</td>
+                <td>${statusBadge}</td>
+                <td>${user.lastLogin || '未知'}</td>
+                <td>${user.registerTime || '未知'}</td>
+                <td>
+                    <div class="action-buttons">
+                        ${!user.banned ?
+                            `<button class="btn btn-danger btn-small" onclick="showBanModal('${escapeHtml(user.username)}')">封禁</button>` :
+                            `<button class="btn btn-success btn-small" onclick="unbanUser('${escapeHtml(user.username)}')">解封</button>`
+                        }
+                        <button class="btn btn-warning btn-small" onclick="showDeleteModal('${escapeHtml(user.username)}')">删除</button>
+                    </div>
+                </td>
+            `;
+
+            tbody.appendChild(tr);
+        });
+    }
+
+    // 显示封禁模态框
+    function showBanModal(username) {
+        document.getElementById('banUsername').value = username;
+        document.getElementById('banReason').value = '';
+        document.getElementById('banDuration').value = '7';
+        document.getElementById('banModal').style.display = 'flex';
+    }
+
+    // 显示删除模态框
+    function showDeleteModal(username) {
+        document.getElementById('deleteUsername').textContent = username;
+        document.getElementById('deleteModal').style.display = 'flex';
+    }
+
+    // 显示清理文件模态框
+    function showCleanupModal() {
+        document.getElementById('cleanupModal').style.display = 'flex';
+    }
+
+    // 显示重启服务器模态框
+    function showRestartModal() {
+        document.getElementById('restartModal').style.display = 'flex';
+    }
+
+    // 关闭模态框
+    function closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+    }
+
+    // 封禁用户
+    async function banUser() {
+        const username = document.getElementById('banUsername').value;
+        const reason = document.getElementById('banReason').value;
+        const duration = document.getElementById('banDuration').value;
+
+        if (!reason.trim()) {
+            showMessage('请输入封禁原因', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch(API_BASE + '/ban', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + adminToken
+                },
+                body: JSON.stringify({
+                    username,
+                    reason,
+                    duration: parseInt(duration)
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showMessage('用户封禁成功', 'success');
+                closeModal('banModal');
+                loadStats();
+                loadUsers();
+            } else {
+                showMessage('用户封禁失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('封禁请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 解封用户
+    async function unbanUser(username) {
+        try {
+            const response = await fetch(API_BASE + '/unban', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + adminToken
+                },
+                body: JSON.stringify({ username })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showMessage('用户解封成功', 'success');
+                loadStats();
+                loadUsers();
+            } else {
+                showMessage('用户解封失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('解封请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 删除用户
+    async function deleteUser() {
+        const username = document.getElementById('deleteUsername').textContent;
+
+        try {
+            const response = await fetch(API_BASE + '/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + adminToken
+                },
+                body: JSON.stringify({ username })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showMessage('用户删除成功', 'success');
+                closeModal('deleteModal');
+                loadStats();
+                loadUsers();
+            } else {
+                showMessage('用户删除失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('删除请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 清理文件
+    async function cleanupFiles() {
+        try {
+            const response = await fetch(API_BASE + '/cleanup', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + adminToken
+                }
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showMessage('文件清理完成', 'success');
+                closeModal('cleanupModal');
+            } else {
+                showMessage('文件清理失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('清理请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 重启服务器
+    async function restartServer() {
+        try {
+            const response = await fetch(API_BASE + '/restart', {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + adminToken
+                }
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                showMessage('服务器重启命令已发送，服务器将在5秒后重启', 'info');
+                closeModal('restartModal');
+
+                // 5秒后刷新页面
+                setTimeout(() => {
+                    window.location.reload();
+                }, 5000);
+            } else {
+                showMessage('重启请求失败: ' + result.message, 'error');
+            }
+        } catch (error) {
+            showMessage('重启请求失败: ' + error.message, 'error');
+        }
+    }
+
+    // 刷新统计信息
+    async function refreshStats() {
+        await loadStats();
+        await loadUsers();
+        showMessage('统计信息已刷新', 'success');
+    }
+
+    // HTML转义函数
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 主题切换功能
+    document.getElementById('themeToggle').addEventListener('click', function() {
+        const currentTheme = document.documentElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('adminTheme', newTheme);
+
+        const icon = this.querySelector('i');
+        if (newTheme === 'dark') {
+            icon.className = 'fas fa-moon';
+        } else {
+            icon.className = 'fas fa-sun';
+        }
+
+        showMessage(`已切换到${newTheme === 'dark' ? '暗色' : '亮色'}主题`, 'info', 2000);
+    });
+
+    // 初始化主题
+    const savedTheme = localStorage.getItem('adminTheme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    const icon = document.querySelector('#themeToggle i');
+    if (savedTheme === 'dark') {
+        icon.className = 'fas fa-moon';
+    } else {
+        icon.className = 'fas fa-sun';
+    }
+
+    // 点击模态框外部关闭
+    window.addEventListener('click', function(event) {
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
+
+    // 检查是否已经登录
+    function checkAdminLogin() {
+        const savedToken = localStorage.getItem('adminToken');
+        if (savedToken) {
+            adminToken = savedToken;
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('adminPanel').classList.remove('hidden');
+            loadStats();
+            loadUsers();
+        }
+    }
+
+    // 保存token到本地存储
+    function saveTokenToStorage() {
+        if (adminToken) {
+            localStorage.setItem('adminToken', adminToken);
+        }
+    }
+
+    // 初始化
+    checkAdminLogin();
+</script>
+</body>
+</html>
+<pre>Admin Web Version:1.0.1    User Web Version:1.0.5    Problem Version:1.0.2</pre>
