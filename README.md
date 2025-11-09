@@ -19,4 +19,4 @@ Features:
 
 Not fully developed yet...
 
-<a href="https://example.com](https://github.com/Cryon-z/CryoChat/blob/main/README-ZH_CN.md">简体中文</a>
+<a href="https://github.com/Cryon-z/CryoChat/blob/main/README-ZH_CN.md">简体中文</a>
