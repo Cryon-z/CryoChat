@@ -1,20 +1,20 @@
-CryoChat - 免费开源的聊天工具
+CryoChat - Free and Open Source Chat Tool
 -
-作者：Cryon-z
+Author: Cryon-z
 
-编写工具：IntelliJ IDEA Community Edition 2025.2.3
+Development Tool: IntelliJ IDEA Community Edition 2025.2.3
 
-环境：Java21
+Environment: Java21
 
-构建工具：Maven
+Build Tool: Maven
 
 -
-功能介绍：
+Features:
 
-    1.基础的聊天功能
+    1. Basic chat functionality
     
-    2.发送文件
+    2. File sending
     
-    3.群发信息
+    3. Group messaging
 
-暂未完善...
+Not fully developed yet...
