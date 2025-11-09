@@ -18,3 +18,5 @@ CryoChat - 免费开源的聊天程序
     3. 群发消息
 
 暂未完善...
+
+<a href="https://github.com/Cryon-z/CryoChat/blob/main/README.md">English</a>
