@@ -20,3 +20,6 @@ CryoChat - 免费开源的聊天程序
 暂未完善...
 
 <a href="https://github.com/Cryon-z/CryoChat/blob/main/README.md">English</a>
+
+<a href="https://github.com/Cryon-z/CryoChat/releases">文件</a>
+
