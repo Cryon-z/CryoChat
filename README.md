@@ -20,4 +20,4 @@ Features:
 Not fully developed yet...
 
 <a href="https://github.com/Cryon-z/CryoChat/blob/main/README-ZH_CN.md">简体中文</a>
-<a href="https://github.com/Cryon-z/CryoChat/tree/main/release/">Files</a>
+<a href="https://github.com/Cryon-z/CryoChat/tree/main/releases/">Files</a>
