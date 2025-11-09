@@ -18,3 +18,5 @@ Features:
     3. Group messaging
 
 Not fully developed yet...
+
+[Link Text]([https://example.com](https://github.com/Cryon-z/CryoChat/blob/main/README-ZH_CN.md) "简体中文")
